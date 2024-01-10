@@ -3,7 +3,7 @@ kind: ScaledObject
 metadata:
   name: nginx-deployment
 spec:
-  cooldownPeriod: 300
+  cooldownPeriod: 10
   maxReplicaCount: 2
   minReplicaCount: 0
   pollingInterval: 30
@@ -15,6 +15,6 @@ spec:
   - metadata:
       desiredReplicas: "2"
       start: 00 09 * * 1-5
-      end: 38 12 * * 1-5
+      end: 50 12 * * 1-5
       timezone: Asia/Kolkata
     type: cron
