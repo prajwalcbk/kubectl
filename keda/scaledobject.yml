@@ -14,7 +14,7 @@ spec:
   triggers:
   - metadata:
       desiredReplicas: "2"
-      start: 00 09 * * 1-4
-      end: 00 21 * * 1-4
+      start: 00 09 * * 1-5
+      end: 00 21 * * 1-5
       timezone: Asia/Kolkata
     type: cron
