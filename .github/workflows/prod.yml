@@ -1,0 +1,120 @@
+name: Trigger Pipeline for PROD
+
+on:
+  release:
+    types:
+      - published
+
+env:
+  ENVIRONMENT: "PROD"
+  PIPELINE_NAME: "Build-and-Deploy"
+
+
+jobs:
+  pre_condition_check:
+    runs-on: 
+      labels: ubuntu-latest
+    
+    if: ${{ github.event_name == 'release' && github.event.release.target_commitish == 'master'}}
+    environment: PROD
+    steps:
+
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Pre Condition check 
+        run: |
+
+          BRANCH=${{ github.event.release.target_commitish }}
+
+          echo "INFO: Current branch "${BRANCH}
+          echo "INFO: Current env "${ENVIRONMENT}
+
+
+          if [ "${ENVIRONMENT}" = "PROD" ] && [ "${BRANCH}" != "master" ]; then
+            echo "ERROR: Failed to trigger Jenkins pipeline for Prod got other than master branch"
+            exit 1  # Mark workflow as failure
+          elif [ "${ENVIRONMENT}" = "UAT" ] || [ "${ENVIRONMENT}" = "STAGE"  ] && \
+               ( [ "${BRANCH}" != "master" ] && [ "${BRANCH}" != "develop" ] && [[ "${BRANCH}" != us-*-release ]] ); then
+            echo "ERROR: Failed to trigger Jenkins pipeline for $ENVIRONMENT got other than master, develop, or us-*-release branch"
+            exit 1  # Mark workflow as failure
+          fi
+
+  set_variables_and_trigger_pipeline:
+    needs: pre_condition_check
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Set jenkin variables 
+        run: |
+          case "${ENVIRONMENT}" in
+            PROD|UAT|STAGE)
+              echo "INFO: Setting variables for PROD jenkins environment"
+              echo "JENKINS_USERNAME=${{ secrets.PROD_JENKINS_USERNAME }}" >> $GITHUB_ENV
+              echo "JENKINS_API_TOKEN=${{ secrets.PROD_JENKINS_API_TOKEN }}" >> $GITHUB_ENV
+              echo "JENKINS_URL=${{ vars.PROD_JENKINS_URL }}" >> $GITHUB_ENV
+              ;;
+            QA[1-5]|DEV-SANDBOX[1-7]|CRT-SANDBOX)
+              echo "INFO: Setting variables for QA jenkins environment"
+              echo "JENKINS_USERNAME=${{ secrets.QA_JENKINS_USERNAME }}" >> $GITHUB_ENV
+              echo "JENKINS_API_TOKEN=${{ secrets.QA_JENKINS_API_TOKEN }}" >> $GITHUB_ENV
+              echo "JENKINS_URL=${{ vars.QA_JENKINS_URL }}" >> $GITHUB_ENV
+              ;;
+            *)
+              echo "ERROR: Invalid ENVIRONMENT"
+              exit 1
+              ;;
+          esac
+
+      - name: Checkout Code
+        uses: actions/checkout@v3
+    
+      - name: Trigger Jenkins Pipeline for Radiant changes
+        run: |
+          # URL of the Jenkins job's build endpoint
+          
+          BRANCH=${{ github.event.release.target_commitish }}
+          TAG=${{ github.event.release.tag_name }}
+
+          COMMIT_LOG=$(git log -1 --format="%h %an %s%n")
+          CAUSE="$COMMIT_LOG to radiant-backend $BRANCH branch"
+
+          JENKINS_BUILD_URL="$JENKINS_URL/job/$ENVIRONMENT/job/$PIPELINE_NAME/buildWithParameters?token=$ENVIRONMENT&cause=$CAUSE"
+          
+          #Encode space character
+          JENKINS_BUILD_URL="${JENKINS_BUILD_URL// /%20}"
+    
+          #Encode # character
+          JENKINS_BUILD_URL="${JENKINS_BUILD_URL//#/%23}"
+          
+          # Set the  parameters
+          RADIANT_BRANCH=$BRANCH 
+          
+          RADIANT_GOLANG=true
+          RADIANT_JAVA=true
+          RADIANT_NODEJS=true
+          DBMIGRATION=true
+          
+          BUILD=true
+          DEPLOY=false
+          
+          
+          GOREMON=false
+          
+
+          # Trigger the Jenkins pipeline using HTTP POST with form data
+          echo "
+          curl -s -o /dev/null -w '%{http_code}' --header 'X-Forwarded-For: github_action' -X POST $JENKINS_BUILD_URL \
+            --user $JENKINS_USERNAME:$JENKINS_API_TOKEN \
+            --data-urlencode 'RADIANT_BRANCH=$RADIANT_BRANCH' \
+            --data-urlencode 'DBMIGRATION=$DBMIGRATION' \
+            --data-urlencode 'RADIANT_GOLANG=$RADIANT_GOLANG' \
+            --data-urlencode 'RADIANT_JAVA=$RADIANT_JAVA' \
+            --data-urlencode 'RADIANT_NODEJS=$RADIANT_NODEJS' \
+            --data-urlencode 'GOREMON=$GOREMON' \
+            --data-urlencode 'BUILD=$BUILD' \
+            --data-urlencode 'DEPLOY=$DEPLOY' \
+            --data-urlencode 'TAG=$TAG' \
+            --data-urlencode 'CODE_CHANGE_APPS_DEPLOYMENT=$CODE_CHANGE_APPS_DEPLOYMENT'\
+            --data-urlencode 'COMMENT=$CAUSE' "
+
